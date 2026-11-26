@@ -1,0 +1,66 @@
+
+//
+// 1. Discover Docker containers
+//
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+//
+// 2. Label logs with container names
+//
+discovery.relabel "container_labels" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "service_name"
+  }
+}
+
+//
+// 3. Read Docker container logs
+//
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.container_labels.rules
+  forward_to    = [loki.write.local.receiver]
+}
+
+//
+// 4. Forward logs to Loki
+//
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+//
+// 5. Scrape FastAPI metrics
+//
+prometheus.scrape "order_api" {
+  targets = [
+    {
+      __address__ = "order-api:8000",
+      job         = "order-api",
+    },
+  ]
+
+  scrape_interval = "15s"
+
+  metrics_path = "/metrics"
+
+  forward_to = [prometheus.remote_write.local.receiver]
+}
+
+//
+// 6. Forward metrics to Prometheus
+//
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
